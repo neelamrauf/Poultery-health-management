@@ -1,7 +1,7 @@
 """
-Inventory URL patterns.
+Knowledge Base URL patterns.
 
-Full implementation added in subsequent tasks (medicines CRUD, dosage calculator).
+Full implementation added in subsequent tasks (articles list with category filter).
 """
 
 from django.urls import path
