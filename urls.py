@@ -1,15 +1,9 @@
 """
-Diagnosis URL patterns.
+Inventory URL patterns.
 
-All routes are included under /api/v1/ via config/api_router.py.
+Full implementation added in subsequent tasks (medicines CRUD, dosage calculator).
 """
 
 from django.urls import path
 
-from .views import DiagnosisHistoryView, DiagnosisView, SymptomListView
-
-urlpatterns = [
-    path("symptoms/", SymptomListView.as_view()),
-    path("diagnosis/", DiagnosisView.as_view()),
-    path("diagnosis/history/", DiagnosisHistoryView.as_view()),
-]
+urlpatterns: list = []
