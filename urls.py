@@ -1,12 +1,15 @@
 """
-Accounts URL patterns: register and login endpoints.
+Diagnosis URL patterns.
+
+All routes are included under /api/v1/ via config/api_router.py.
 """
 
 from django.urls import path
 
-from .views import LoginView, RegisterView
+from .views import DiagnosisHistoryView, DiagnosisView, SymptomListView
 
 urlpatterns = [
-    path('register/', RegisterView.as_view(), name='register'),
-    path('login/', LoginView.as_view(), name='login'),
+    path("symptoms/", SymptomListView.as_view()),
+    path("diagnosis/", DiagnosisView.as_view()),
+    path("diagnosis/history/", DiagnosisHistoryView.as_view()),
 ]
