@@ -1,78 +1,110 @@
 """
-Serializers for the Diagnosis app.
+Serializers for the Orders app.
+
+Handles checkout (POST /api/v1/orders/), order listing, and detail views.
 """
 
+from decimal import Decimal
+
+from django.db import transaction
 from rest_framework import serializers
 
-from .models import DiagnosisSession, Disease, Symptom
+from apps.inventory.models import Medicine
+
+from .models import Order, OrderItem
 
 
-class SymptomSerializer(serializers.ModelSerializer):
+class OrderItemInputSerializer(serializers.Serializer):
+    """Validates a single line item submitted to the checkout endpoint."""
+
+    medicine_id = serializers.IntegerField(min_value=1)
+    quantity = serializers.IntegerField(min_value=1)
+
+
+class OrderItemSerializer(serializers.ModelSerializer):
+    """Read serializer for an OrderItem, including the medicine name."""
+
+    medicine_name = serializers.CharField(source="medicine.name", read_only=True)
+
     class Meta:
-        model = Symptom
-        fields = ('id', 'name')
+        model = OrderItem
+        fields = ("id", "medicine_id", "medicine_name", "quantity", "unit_price")
 
 
-class DiseaseSerializer(serializers.ModelSerializer):
+class OrderSerializer(serializers.ModelSerializer):
+    """Read serializer for an Order, including nested line items."""
+
+    items = OrderItemSerializer(many=True, read_only=True)
+
     class Meta:
-        model = Disease
-        fields = ('id', 'name')
+        model = Order
+        fields = ("id", "submitted_at", "total_amount", "items")
 
 
-class DiagnosisHistorySerializer(serializers.ModelSerializer):
+class CheckoutSerializer(serializers.Serializer):
     """
-    Serializes a DiagnosisSession for the history list endpoint.
+    Write serializer for the checkout endpoint (POST /api/v1/orders/).
 
-    Fields returned:
-        id, submitted_at,
-        top_disease: {id, name},
-        top_score,
-        symptoms: [{id, name}]
+    Validates the items list, looks up each medicine, captures the current
+    unit_price, computes total_amount, and persists Order + OrderItems.
     """
 
-    top_disease = DiseaseSerializer(read_only=True)
-    symptoms = SymptomSerializer(many=True, read_only=True)
-
-    class Meta:
-        model = DiagnosisSession
-        fields = ('id', 'submitted_at', 'top_disease', 'top_score', 'symptoms')
-
-
-class DiagnosisInputSerializer(serializers.Serializer):
-    """Validates the symptom_ids submitted to POST /diagnosis/."""
-
-    symptom_ids = serializers.ListField(
-        child=serializers.IntegerField(),
+    items = serializers.ListField(
+        child=OrderItemInputSerializer(),
         min_length=1,
         error_messages={
-            "min_length": "symptom_ids must not be empty.",
-            "required": "symptom_ids is required.",
+            "min_length": "items must not be empty.",
+            "required": "items is required.",
         },
     )
 
+    def validate_items(self, items):
+        """Ensure all referenced medicines exist."""
+        medicine_ids = [item["medicine_id"] for item in items]
+        found = set(
+            Medicine.objects.filter(id__in=medicine_ids).values_list("id", flat=True)
+        )
+        missing = set(medicine_ids) - found
+        if missing:
+            raise serializers.ValidationError(
+                f"Medicine IDs not found: {sorted(missing)}"
+            )
+        return items
 
-class DiagnosisResultSerializer(serializers.Serializer):
-    """
-    Serializes a single result dict produced by run_diagnosis().
+    def create(self, validated_data):
+        """
+        Persist Order + OrderItems atomically.
 
-    Expected dict shape:
-        {'disease': <Disease instance>, 'match_score': <float>}
-    """
+        - unit_price is captured from Medicine.unit_price at the time of order.
+        - total_amount is the sum of quantity × unit_price across all items.
+        """
+        farmer = self.context["request"].user
+        items_data = validated_data["items"]
 
-    disease_id = serializers.SerializerMethodField()
-    name = serializers.SerializerMethodField()
-    match_score = serializers.FloatField()
-    severity = serializers.SerializerMethodField()
-    treatment_recommendations = serializers.SerializerMethodField()
+        # Fetch all medicines in one query
+        medicine_ids = [item["medicine_id"] for item in items_data]
+        medicines = {m.id: m for m in Medicine.objects.filter(id__in=medicine_ids)}
 
-    def get_disease_id(self, obj):
-        return obj["disease"].id
+        # Compute total amount
+        total_amount = Decimal("0.00")
+        for item in items_data:
+            medicine = medicines[item["medicine_id"]]
+            total_amount += medicine.unit_price * item["quantity"]
 
-    def get_name(self, obj):
-        return obj["disease"].name
+        # Persist the order and line items atomically so a partial write never
+        # leaves the database in an inconsistent state.
+        with transaction.atomic():
+            order = Order.objects.create(farmer=farmer, total_amount=total_amount)
 
-    def get_severity(self, obj):
-        return obj["disease"].severity
+            # Persist each line item with the unit price captured at order time
+            OrderItem.objects.bulk_create([
+                OrderItem(
+                    order=order,
+                    medicine=medicines[item["medicine_id"]],
+                    quantity=item["quantity"],
+                    unit_price=medicines[item["medicine_id"]].unit_price,
+                )
+                for item in items_data
+            ])
 
-    def get_treatment_recommendations(self, obj):
-        return obj["disease"].treatment_recommendations
+        return order

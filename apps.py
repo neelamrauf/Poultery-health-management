@@ -1,7 +1,7 @@
 from django.apps import AppConfig
 
 
-class KnowledgeBaseConfig(AppConfig):
+class OrdersConfig(AppConfig):
     default_auto_field = "django.db.models.BigAutoField"
-    name = "apps.knowledge_base"
-    label = "knowledge_base"
+    name = "apps.orders"
+    label = "orders"

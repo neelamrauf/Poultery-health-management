@@ -1,9 +1,12 @@
 """
-Knowledge Base URL patterns.
-
-Full implementation added in subsequent tasks (articles list with category filter).
+Orders URL patterns.
 """
 
 from django.urls import path
 
-urlpatterns: list = []
+from .views import OrderDetailView, OrderListCreateView
+
+urlpatterns = [
+    path("orders/", OrderListCreateView.as_view(), name="order-list-create"),
+    path("orders/<int:pk>/", OrderDetailView.as_view(), name="order-detail"),
+]
